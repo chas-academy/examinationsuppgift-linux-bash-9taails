@@ -1,101 +1,113 @@
 #!/bin/bash
 #
-# Set up a new User account. The new User will belong to user 
-# group with the same name. A personal workspace will be created for 
-# them at /home/User with default Documents, Downloads and Work folders.
-# Only the User will have RWX permissions for their own workspace. 
-# A file with a welcome message will be placed in the /home/User/.
+# Set up a new User account. Takes a list of names in an alphanumeric format 
+# ONLY. No special characters are allowed. Creates default workspace folders 
+# and a welcome message.
 
 
-###############################################
-# Authorization for executor. This shell
-# script requires elevated privileges to run.
-###############################################
+########################################################
+# 					User authorization. 
+# This shell script requires elevated privileges to run.
+########################################################
+
 if [[ $EUID -ne 0 ]]; then
-    echo "Unauthorized operation."
-    exit 1
+	echo "Unauthorized operation. Run as root."
+	exit 1
 fi
 
+########################################################
+# 					Input validation.
+# Processes the input names and adds them to two arrays.
+# Each array is checked separately to provide a single
+# feedback on input errors. If any of the arrays have 
+# more than one element, exit the script. 
+########################################################
 
-###############################################
-# Validate the input list.
-# Arguments:
-#   A list of users.
-# Returns:
-#   bool:   0 - If ANY of the names in the list
-#           have wrong format or already exist;
-#           1 - If we can proceed with adding a
-#           new User for ALL names in the list.
-###############################################
-process_users() {
+for name in "${@}"; do
+	# Invalid name format
+	if ! [[ "$name" =~ ^[[:alnum:]]+$ ]]; then
+		invalid_input+="${name} "
+	else
+		# Duplicate user
+		if [[ -n "$(getent group "$name")" ]]; then
+			duplicates+="${name} "
+		fi
+	fi
+done
 
-    local person
+# Display a list of users with invalid names, if any exist.
+if [[ "${#invalid_input[@]}" -gt 0 ]]; then
+	echo -e "Error: Invalid user name(s): ${invalid_input[*]}.\n"\
+	"Names may not contain any special characters."
+fi
 
-    for person in "${@}"; do
+# Display a list of duplicate usernames, if any exist.
+if [[ "${#duplicates[@]}" -gt 0 ]]; then
+    # shellcheck disable=SC2140
+	echo -e "Error: Existing user name(s): ${duplicates[*]}.\n"\
+		"Choose a name that's not in the following list:\n"\
+		"$(ls /home/)".""
+fi
 
-        # Validate the input string
-        # If it is not alphanumeric only, return.
-        if ! [[ "$person" =~ ^[[:alnum:]]+$ ]]; then
-            echo -e "Invalid name format for $person."
-            echo "No special characters allowed."
-            echo "Change the name and try again."
-            return 0
-        fi
+# If any of those lists contain elements, exit.
+if [[ "${#invalid_input[@]}" -gt 0 || "${#duplicates[@]}" -gt 0 ]]; then
+	exit 1
+fi
 
-        # Name format is correct; check the name against existing groups.
-        # If User exists, return.
-        if [[ -n "$(getent group $person)" ]]; then
-                echo "User $person already exists."
-                echo "Choose a different username."
-                return 0
-        fi
-    done
+########################################################
+# 				Create default workspace.
+# 1. Check if /etc/skel directory is empty and add the
+#    needed directories. (I assume that normally the 
+#	 skeleton file would already contain the premade
+#    structure, instead of hardcoding it in the script.)
+# 2. Create an empty welcome file in the home directory.
+########################################################
 
-    # Name format is correct and there is no user with the same name.
-    return 1
-}
+if [[ -z "$(ls /etc/skel/)" ]]; then
+	mkdir /etc/skel/Documents
+    mkdir /etc/skel/Downloads
+	mkdir /etc/skel/Work
+	touch /etc/skel/welcome.txt
+	"$(ls /etc/skel/)"
+fi
 
+########################################################
+# 					Add users.
+# 1. Create a root-access file to store the initial,
+#    generated passwords.
+# 2. Add a new user, with following options:
+#		- password expired (user must change to own 
+#         password on first login
+#       - day counts related to user password change
+#		- encrypting the initial password
+#		- creating home directory
+#       - adding user name to welcome message
+########################################################
 
-###############################################
-# Add new user account and workspace.
-# Arguments:
-#   A (validated) list of users.
-# Outputs:
-#   User <NAME> directory at /home/<NAME>
-#   Directories: /home/<NAME>/Documents
-#                /home/<NAME>/Downloads
-#                /home/<NAME>/Work
-#   User group <NAME>
-#   welcome.txt at /home/<NAME>
-###############################################
-check_user() {
-    # Loop over the input names and check if any of them already exist among users
-    for name in "$@"; do
-        
-            read -p "Do you want to select a new name or add an ID? [name|id] "
-            if [[ "$REPLY" == "user" ]]; then
-                read -p "Input the new username. >" username 
-                if ! [[ "$username" =~ ^[[:alnum:]\._]+$ ]]; then
-                    check "$username"
-                else
-                    echo "Invalid name format."
-                    check_user "$name"
-                fi
+if ! [[ -e /home/tails/user_access ]]; then
+	touch /home/tails/user_access
+	chmod 700 /home/tails/user_access
+fi
 
-            fi
+# Add new users.
+for name in "${@}"; do
+	temp_pass=$(od -An -t x8 -N8 /dev/urandom)
+	echo "$name" "$temp_pass" >> /home/tails/user_access
+	useradd --badname \
+			-f 0 \
+	        -K PASS_MAX_DAYS=90 \
+	    	-K PASS_MIN_DAYS=7 \
+            -K PASS_WARN_AGE=14 \
+            -m \
+            -p "$(openssl passwd -6 "${temp_pass}")" \
+            "$name"
 
-        else
-            echo "User $name has been created."
-        fi
-    done
-}
+	echo "User $name created."
+	echo "Välkommen ${name^}" >> /home/"${name}"/welcome.txt
+	# TODO
+done
 
-## Each user should have a random ID assigned
-## Check how spaces are handled + input sanitizing
-# Default folders: Documents, Downloads, Work
-# Default location: /root/home/NewUser
+#TODO Check permissions on folders
 
-# Create a separate file with permissions and ref in as ENV?
-
-# Create an array with default folders
-#DEF=("Documents"  "Downloads" "Work")
+echo -e "The following user account have been created:\n" \
+        "${*}."
