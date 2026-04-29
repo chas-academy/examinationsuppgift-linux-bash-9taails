@@ -110,6 +110,7 @@ for name in "${@}"; do
 			-m \
             -p "$(openssl passwd -6 "${temp_pass}")" \
             "$name"
+	passwd -e "${name}"
 	echo "User $name created."
 	echo "Välkommen ${name^}" >> /home/"${name}"/welcome.txt
 	echo "${@}" >> /home/"${name}"/welcome.txt
