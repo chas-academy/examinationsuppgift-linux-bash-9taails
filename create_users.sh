@@ -25,7 +25,7 @@ fi
 
 for name in "${@}"; do
 	# Invalid name format
-	if ! [[ "$name" =~ ^[[:alnum:]]+$ ]]; then
+	if ! [[ "$name" =~ ^[[:alpha:]][[:alnum:]]+$ ]]; then
 		invalid_input+="${name} "
 	else
 		# Duplicate user
@@ -57,27 +57,49 @@ if [[ "${#invalid_input[@]}" -gt 0 || "${#duplicates[@]}" -gt 0 ]]; then
 	exit 1
 fi
 
+#echo "-----------------> START CLEAN-UP <-------------------"
+#users="$(ls /home/)"
+#for rem in ${users[@]}; do
+#	if [[ ${rem} != "tails" ]]; then
+#		userdel -r "${rem}"
+#	fi
+#done
+#
+#rm /home/tails/user_access
+#
+#rmdir /etc/skel/Documents
+#rmdir /etc/skel/Downloads
+#rmdir /etc/skel/Work
+#rm -r /etc/skel/welcome.txt
+#echo "------------------> END CLEAN-UP <--------------------"
+
 ########################################################
-# 		Create default workspace.
-# 1. Check if /etc/skel directory is empty and add the
-#    needed directories. (I assume that normally the
-#    skeleton file would already contain the premade
-#    structure, instead of hardcoding it in the script.)
-# 2. Create an empty welcome file in the home directory.
+# 			Create default workspace.
+# Loop over an array with names for default folders.
+# Check if the folders exist, if not, create them.
+# Repeat the process for the welcome file. Set 700
+# permissions for the entire directory and its contents.
 ########################################################
 
-if [[ -z "$(ls /etc/skel/)" ]]; then
-	mkdir /etc/skel/Documents
-	mkdir /etc/skel/Downloads
-	mkdir /etc/skel/Work
+# Create default folders if they don't exist
+
+defaults=(Documents Downloads Work)
+
+for m in "${defaults[@]}"; do
+	file -d -E /etc/skel/"${m}" >/dev/null
+	if [[ $? == 1 ]]; then
+		mkdir /etc/skel/"${m}"
+	fi
+done
+
+# Create a welcome file, if it doesn't exist
+
+if [[ ! -e "/etc/skel/welcome.txt" ]]; then
 	touch /etc/skel/welcome.txt
-	"$(ls /etc/skel/)"
 fi
 
-chmod 700 /etc/skel/Documents
-chmod 700 /etc/skel/Downloads
-chmod 700 /etc/skel/Work
-chmod 700 /etc/skel/welcome.txt
+# Set correct permissions for dir and all contents
+chmod -R 700 /etc/skel/
 
 ########################################################
 # 			Add users.
@@ -116,8 +138,9 @@ for name in "${@}"; do
 	echo "${@}" >> /home/"${name}"/welcome.txt
 done
 
-# Check permissions on folders
-
-
-echo -e "The following user account have been created:\n" \
-        "${@}"
+if [[ "${#@}" -gt 0 ]]; then
+	echo -e "The following user accounts have been created:\n"\
+    "${@}"
+else
+	echo "No new users created."
+fi
